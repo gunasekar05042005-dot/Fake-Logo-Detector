@@ -1,8 +1,3 @@
-# ╔══════════════════════════════════════════════════════════════════╗
-#  app.py — Fake Logo Detector API  (Secured Production Version)
-#  Vercel entry point — this file must be named app.py
-# ╚══════════════════════════════════════════════════════════════════╝
-
 import os, io, pickle, logging, time
 from datetime import datetime
 from functools import wraps
@@ -17,15 +12,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Logging ───────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[logging.FileHandler("api.log"), logging.StreamHandler()]
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
-# ── Config from .env ──────────────────────────
 API_KEY          = os.environ.get("API_KEY", "change-me-secret")
 ALLOWED_ORIGINS  = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 EMBEDDINGS_FILE  = os.environ.get("EMBEDDINGS_FILE", "./logo_embeddings_clip.pkl")
@@ -36,14 +29,22 @@ IS_VERCEL        = bool(os.environ.get("VERCEL", False))
 SIMILARITY_THRESHOLD = 0.80
 HIGH_CONF_THRESHOLD  = 0.88
 LOW_CONF_THRESHOLD   = 0.60
-ALLOWED_MIME_TYPES   = {"jpeg", "png", "webp", "bmp"}
 
-# ── Flask app ─────────────────────────────────
+# Allowed image signatures (magic bytes) — replaces removed imghdr module
+IMAGE_SIGNATURES = {
+    b'\xff\xd8\xff': 'jpeg',
+    b'\x89PNG':      'png',
+    b'GIF8':         'gif',
+    b'RIFF':         'webp',
+    b'BM':           'bmp',
+}
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 CORS(app, origins=ALLOWED_ORIGINS)
 limiter = Limiter(get_remote_address, app=app,
                   default_limits=[RATE_LIMIT], storage_uri="memory://")
+
 
 # ── Feature extractor ─────────────────────────
 class LightExtractor:
@@ -78,26 +79,27 @@ class CLIPExtractor:
 
 def load_extractor():
     if IS_VERCEL:
-        logger.info("Vercel mode — lightweight extractor")
+        logger.info("Vercel — lightweight extractor")
         return LightExtractor()
     try:
         e = CLIPExtractor()
-        logger.info("CLIP extractor loaded")
+        logger.info("CLIP loaded")
         return e
     except Exception as ex:
-        logger.warning(f"CLIP failed ({ex}) — lightweight extractor")
+        logger.warning(f"CLIP failed — lightweight: {ex}")
         return LightExtractor()
 
 extractor = load_extractor()
+
 
 # ── Database ──────────────────────────────────
 def load_database():
     if os.path.exists(EMBEDDINGS_FILE):
         with open(EMBEDDINGS_FILE,"rb") as f:
             db = pickle.load(f)
-        logger.info(f"Database loaded — {len(db)} brand(s)")
+        logger.info(f"DB loaded — {len(db)} brands")
         return db
-    logger.warning("No database file found")
+    logger.warning(f"No DB file at {EMBEDDINGS_FILE}")
     return {}
 
 database = load_database()
@@ -106,14 +108,20 @@ def save_database():
     with open(EMBEDDINGS_FILE,"wb") as f:
         pickle.dump(database,f)
 
-# ── Security helpers ──────────────────────────
-def validate_image(raw):
+
+# ── File validation (no imghdr needed) ────────
+def detect_image_type(raw: bytes) -> str:
+    for sig, name in IMAGE_SIGNATURES.items():
+        if raw[:len(sig)] == sig:
+            return name
+    return None
+
+def validate_image(raw: bytes) -> Image.Image:
     if not raw:
         raise ValueError("Empty file.")
-    import imghdr
-    detected = imghdr.what(None, h=raw)
-    if detected not in ALLOWED_MIME_TYPES:
-        raise ValueError(f"Invalid file type. Allowed: jpg, png, webp, bmp")
+    img_type = detect_image_type(raw)
+    if not img_type:
+        raise ValueError("Invalid file. Only jpg, png, webp, bmp allowed.")
     try:
         img = Image.open(io.BytesIO(raw))
         img.verify()
@@ -124,30 +132,32 @@ def validate_image(raw):
     clean.putdata(list(img.getdata()))
     return clean.convert("RGB")
 
+
+# ── API key auth ──────────────────────────────
 def require_api_key(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         key = request.headers.get("X-API-Key","")
         if not key:
-            logger.warning(f"[AUTH] Missing key — IP:{request.remote_addr}")
             return jsonify({"success":False,"error":"API key required. Send X-API-Key header."}),401
         if key != API_KEY:
-            logger.warning(f"[AUTH] Wrong key — IP:{request.remote_addr}")
+            logger.warning(f"Wrong API key from {request.remote_addr}")
             return jsonify({"success":False,"error":"Invalid API key."}),401
         return f(*args, **kwargs)
     return decorated
+
 
 # ── Request logging ───────────────────────────
 @app.before_request
 def before():
     g.start = time.time()
-    logger.info(f"[REQ] {request.method} {request.path} IP:{request.remote_addr}")
 
 @app.after_request
 def after(response):
     ms = round((time.time()-g.start)*1000,1)
-    logger.info(f"[RES] {request.path} → {response.status_code} ({ms}ms)")
+    logger.info(f"{request.method} {request.path} → {response.status_code} ({ms}ms)")
     return response
+
 
 # ── Error handlers ────────────────────────────
 @app.errorhandler(400)
@@ -160,7 +170,7 @@ def unauthorized(e):
 
 @app.errorhandler(404)
 def not_found(e):
-    return jsonify({"success":False,"error":f"Endpoint not found: {request.path}"}),404
+    return jsonify({"success":False,"error":f"Not found: {request.path}"}),404
 
 @app.errorhandler(413)
 def too_large(e):
@@ -168,53 +178,58 @@ def too_large(e):
 
 @app.errorhandler(429)
 def rate_limited(e):
-    return jsonify({"success":False,"error":f"Too many requests. Limit: {RATE_LIMIT}."}),429
+    return jsonify({"success":False,"error":"Too many requests. Try again later."}),429
 
 @app.errorhandler(500)
 def server_error(e):
-    logger.error(f"[500] {e}")
+    logger.error(f"500 error: {e}")
     return jsonify({"success":False,"error":"Internal server error."}),500
 
-# ── Detection logic ───────────────────────────
-def cosine_sim(a,b):
+
+# ── Detection ─────────────────────────────────
+def cosine_sim(a, b):
     return float(np.dot(a,b)/(np.linalg.norm(a)*np.linalg.norm(b)+1e-8))
 
 def run_detection(img):
     if not database:
-        return {"verdict":"UNKNOWN","confidence":"LOW","similarity_score":0.0,
-                "matched_brand":None,"message":"Database empty. Add logos first."}
+        return {"verdict":"UNKNOWN","confidence":"LOW",
+                "similarity_score":0.0,"matched_brand":None,
+                "message":"Database empty. No brands loaded."}
     q = extractor.extract_from_pil(img)
-    best_brand,best_score = None,-1.0
-    for brand,stored in database.items():
-        s = cosine_sim(q,stored)
-        if s>best_score:
-            best_score,best_brand=s,brand
-    best_score = round(best_score,4)
-    if best_score>=HIGH_CONF_THRESHOLD:
-        v,c,m="AUTHENTIC","HIGH",f"Very close match to '{best_brand}'."
-    elif best_score>=SIMILARITY_THRESHOLD:
-        v,c,m="AUTHENTIC","MEDIUM",f"Matches '{best_brand}' with moderate confidence."
-    elif best_score>=LOW_CONF_THRESHOLD:
-        v,c,m="FAKE","MEDIUM",f"Resembles '{best_brand}' but too low similarity."
+    best_brand, best_score = None, -1.0
+    for brand, stored in database.items():
+        s = cosine_sim(q, stored)
+        if s > best_score:
+            best_score, best_brand = s, brand
+    best_score = round(best_score, 4)
+    if best_score >= HIGH_CONF_THRESHOLD:
+        v,c,m = "AUTHENTIC","HIGH",   f"Very close match to '{best_brand}'."
+    elif best_score >= SIMILARITY_THRESHOLD:
+        v,c,m = "AUTHENTIC","MEDIUM", f"Matches '{best_brand}' with moderate confidence."
+    elif best_score >= LOW_CONF_THRESHOLD:
+        v,c,m = "FAKE",     "MEDIUM", f"Resembles '{best_brand}' but too low similarity."
     else:
-        v,c,m="FAKE","HIGH","No match found in database."
+        v,c,m = "FAKE",     "HIGH",   "No match found in database."
     return {"verdict":v,"confidence":c,"similarity_score":best_score,
             "matched_brand":best_brand,"message":m,
             "timestamp":datetime.utcnow().isoformat()+"Z"}
+
 
 # ── Routes ────────────────────────────────────
 @app.route("/")
 @limiter.exempt
 def index():
     return jsonify({
-        "name":"Fake Logo Detector API",
-        "version":"3.0",
-        "endpoints":{
-            "POST /detect":"Detect logo (public)",
-            "GET  /brands":"List brands (public)",
-            "POST /add-brand":"Add brand (API key required)",
-            "DELETE /brand/<name>":"Remove brand (API key required)",
-            "GET  /health":"Health check"
+        "name": "Fake Logo Detector API",
+        "version": "3.0",
+        "status": "running",
+        "brands_loaded": len(database),
+        "endpoints": {
+            "POST /detect":      "Detect logo — public",
+            "GET  /brands":      "List brands — public",
+            "POST /add-brand":   "Add brand — API key required",
+            "DELETE /brand/<n>": "Remove brand — API key required",
+            "GET  /health":      "Health check"
         }
     })
 
@@ -222,10 +237,10 @@ def index():
 @limiter.exempt
 def health():
     return jsonify({
-        "status":"ok",
-        "brands_loaded":len(database),
-        "mode":"vercel-light" if IS_VERCEL else "clip-full",
-        "timestamp":datetime.utcnow().isoformat()+"Z"
+        "status": "ok",
+        "brands_loaded": len(database),
+        "mode": "vercel-light" if IS_VERCEL else "clip-full",
+        "timestamp": datetime.utcnow().isoformat()+"Z"
     })
 
 @app.route("/detect", methods=["POST"])
@@ -234,22 +249,23 @@ def detect():
     try:
         if "image" not in request.files:
             return jsonify({"success":False,
-                "error":"No image. Send as multipart/form-data with field 'image'."}),400
+                "error":"No image. Send multipart/form-data with field 'image'."}),400
         raw = request.files["image"].read()
         img = validate_image(raw)
         result = run_detection(img)
-        logger.info(f"[DETECT] {result['verdict']} score={result['similarity_score']} brand={result['matched_brand']}")
+        logger.info(f"DETECT {result['verdict']} score={result['similarity_score']} brand={result['matched_brand']}")
         return jsonify({"success":True,"result":result})
     except ValueError as e:
         return jsonify({"success":False,"error":str(e)}),400
     except Exception as e:
-        logger.error(f"[DETECT] {e}")
+        logger.error(f"DETECT error: {e}")
         return jsonify({"success":False,"error":"Detection failed."}),500
 
 @app.route("/brands")
 @limiter.limit("30 per minute")
 def brands():
-    return jsonify({"success":True,"count":len(database),"brands":sorted(database.keys())})
+    return jsonify({"success":True,"count":len(database),
+                    "brands":sorted(database.keys())})
 
 @app.route("/add-brand", methods=["POST"])
 @require_api_key
@@ -258,21 +274,22 @@ def add_brand():
     try:
         name = request.form.get("brand_name","").strip().lower()
         if not name:
-            return jsonify({"success":False,"error":"brand_name field required."}),400
-        if len(name)>50:
-            return jsonify({"success":False,"error":"brand_name too long (max 50 chars)."}),400
+            return jsonify({"success":False,"error":"brand_name required."}),400
+        if len(name) > 50:
+            return jsonify({"success":False,"error":"brand_name too long."}),400
         if "image" not in request.files:
-            return jsonify({"success":False,"error":"image field required."}),400
+            return jsonify({"success":False,"error":"image required."}),400
         raw = request.files["image"].read()
         img = validate_image(raw)
         database[name] = extractor.extract_from_pil(img)
         save_database()
-        logger.info(f"[ADD] '{name}' added. Total: {len(database)}")
-        return jsonify({"success":True,"message":f"Brand '{name}' added.","total_brands":len(database)}),201
+        logger.info(f"ADD '{name}' — total: {len(database)}")
+        return jsonify({"success":True,"message":f"'{name}' added.",
+                        "total_brands":len(database)}),201
     except ValueError as e:
         return jsonify({"success":False,"error":str(e)}),400
     except Exception as e:
-        logger.error(f"[ADD] {e}")
+        logger.error(f"ADD error: {e}")
         return jsonify({"success":False,"error":"Failed to add brand."}),500
 
 @app.route("/brand/<brand_name>", methods=["DELETE"])
@@ -281,11 +298,12 @@ def add_brand():
 def remove_brand(brand_name):
     key = brand_name.lower().strip()
     if key not in database:
-        return jsonify({"success":False,"error":f"Brand '{key}' not found."}),404
+        return jsonify({"success":False,"error":f"'{key}' not found."}),404
     del database[key]
     save_database()
-    logger.info(f"[DEL] '{key}' removed. Remaining: {len(database)}")
-    return jsonify({"success":True,"message":f"Brand '{key}' removed.","remaining":len(database)})
+    logger.info(f"DEL '{key}' — remaining: {len(database)}")
+    return jsonify({"success":True,"message":f"'{key}' removed.",
+                    "remaining":len(database)})
 
 if __name__ == "__main__":
     logger.info("Starting local dev server...")
