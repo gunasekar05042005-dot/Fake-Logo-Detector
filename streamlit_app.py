@@ -1,19 +1,37 @@
 import streamlit as st
+import torch
+from PIL import Image
+import clip
 
-# Set the title of the web app
-def main():
-    st.title('Fake Logo Detector')
+# Load the CLIP model
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+model, preprocess = clip.load('ViT-B/32', device=device)
 
-    # File uploader for logo images
-    uploaded_file = st.file_uploader('Upload a logo image...', type=['png', 'jpg', 'jpeg'])
-    if uploaded_file is not None:
-        # Placeholder for the detection logic, replace with actual logic from fake_logo_detector_allinone_1.py
-        # Sample logic might include using a trained model to predict if the logo is real or fake.
-        st.image(uploaded_file, caption='Uploaded Logo', use_column_width=True)
-        st.write('Detecting...')
-        # Replace this with actual prediction logic
-        result = 'Fake Logo Detected'  # Example output
-        st.write(result)
+st.title('Logo Detection with CLIP and Streamlit')
 
-if __name__ == '__main__':
-    main()
+# Upload an image
+uploaded_file = st.file_uploader('Choose an image...', type=['jpg', 'png'])
+
+if uploaded_file is not None:
+    # Preprocess the image
+    image = Image.open(uploaded_file)
+    image_input = preprocess(image).unsqueeze(0).to(device)
+    
+    # Define logo labels
+    logo_labels = ['Nike', 'Adidas', 'Puma', 'Pepsi', 'Coca Cola']
+    text_inputs = torch.cat([clip.tokenize(logo) for logo in logo_labels]).to(device)
+    
+    # Compute features
+    with torch.no_grad():
+        image_features = model.encode_image(image_input)
+        text_features = model.encode_text(text_inputs)
+        
+    # Normalize features
+    image_features /= image_features.norm(dim=-1, keepdim=True)
+    text_features /= text_features.norm(dim=-1, keepdim=True)
+    
+    # Calculate similarity
+    similarity = (100.0 * image_features @ text_features.T).softmax(dim=-1)
+    best_label = logo_labels[similarity.argmax().item()]
+    st.image(image, caption='Uploaded Image', use_column_width=True)
+    st.write(f'Predicted Logo: {best_label}')
