@@ -4,7 +4,7 @@ from functools import wraps
 
 import numpy as np
 from PIL import Image
-from flask import Flask, request, jsonify, g
+from flask import Flask, request, jsonify, g, send_from_directory
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -30,7 +30,6 @@ SIMILARITY_THRESHOLD = 0.80
 HIGH_CONF_THRESHOLD  = 0.88
 LOW_CONF_THRESHOLD   = 0.60
 
-# Allowed image signatures (magic bytes) — replaces removed imghdr module
 IMAGE_SIGNATURES = {
     b'\xff\xd8\xff': 'jpeg',
     b'\x89PNG':      'png',
@@ -39,7 +38,7 @@ IMAGE_SIGNATURES = {
     b'BM':           'bmp',
 }
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='.')
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 CORS(app, origins=ALLOWED_ORIGINS)
 limiter = Limiter(get_remote_address, app=app,
@@ -99,7 +98,7 @@ def load_database():
             db = pickle.load(f)
         logger.info(f"DB loaded — {len(db)} brands")
         return db
-    logger.warning(f"No DB file at {EMBEDDINGS_FILE}")
+    logger.warning(f"No DB at {EMBEDDINGS_FILE}")
     return {}
 
 database = load_database()
@@ -109,25 +108,24 @@ def save_database():
         pickle.dump(database,f)
 
 
-# ── File validation (no imghdr needed) ────────
-def detect_image_type(raw: bytes) -> str:
+# ── File validation ───────────────────────────
+def detect_image_type(raw):
     for sig, name in IMAGE_SIGNATURES.items():
         if raw[:len(sig)] == sig:
             return name
     return None
 
-def validate_image(raw: bytes) -> Image.Image:
+def validate_image(raw):
     if not raw:
         raise ValueError("Empty file.")
-    img_type = detect_image_type(raw)
-    if not img_type:
+    if not detect_image_type(raw):
         raise ValueError("Invalid file. Only jpg, png, webp, bmp allowed.")
     try:
         img = Image.open(io.BytesIO(raw))
         img.verify()
         img = Image.open(io.BytesIO(raw))
     except Exception:
-        raise ValueError("Corrupted or invalid image file.")
+        raise ValueError("Corrupted or invalid image.")
     clean = Image.new(img.mode, img.size)
     clean.putdata(list(img.getdata()))
     return clean.convert("RGB")
@@ -139,9 +137,8 @@ def require_api_key(f):
     def decorated(*args, **kwargs):
         key = request.headers.get("X-API-Key","")
         if not key:
-            return jsonify({"success":False,"error":"API key required. Send X-API-Key header."}),401
+            return jsonify({"success":False,"error":"API key required."}),401
         if key != API_KEY:
-            logger.warning(f"Wrong API key from {request.remote_addr}")
             return jsonify({"success":False,"error":"Invalid API key."}),401
         return f(*args, **kwargs)
     return decorated
@@ -182,7 +179,7 @@ def rate_limited(e):
 
 @app.errorhandler(500)
 def server_error(e):
-    logger.error(f"500 error: {e}")
+    logger.error(f"500: {e}")
     return jsonify({"success":False,"error":"Internal server error."}),500
 
 
@@ -194,7 +191,7 @@ def run_detection(img):
     if not database:
         return {"verdict":"UNKNOWN","confidence":"LOW",
                 "similarity_score":0.0,"matched_brand":None,
-                "message":"Database empty. No brands loaded."}
+                "message":"Database empty."}
     q = extractor.extract_from_pil(img)
     best_brand, best_score = None, -1.0
     for brand, stored in database.items():
@@ -207,7 +204,7 @@ def run_detection(img):
     elif best_score >= SIMILARITY_THRESHOLD:
         v,c,m = "AUTHENTIC","MEDIUM", f"Matches '{best_brand}' with moderate confidence."
     elif best_score >= LOW_CONF_THRESHOLD:
-        v,c,m = "FAKE",     "MEDIUM", f"Resembles '{best_brand}' but too low similarity."
+        v,c,m = "FAKE",     "MEDIUM", f"Resembles '{best_brand}' but similarity too low."
     else:
         v,c,m = "FAKE",     "HIGH",   "No match found in database."
     return {"verdict":v,"confidence":c,"similarity_score":best_score,
@@ -215,23 +212,15 @@ def run_detection(img):
             "timestamp":datetime.utcnow().isoformat()+"Z"}
 
 
-# ── Routes ────────────────────────────────────
+# ══════════════════════════════════════════════
+#  ROUTES
+# ══════════════════════════════════════════════
+
+# ── Serve HTML UI at root ─────────────────────
 @app.route("/")
 @limiter.exempt
 def index():
-    return jsonify({
-        "name": "Fake Logo Detector API",
-        "version": "3.0",
-        "status": "running",
-        "brands_loaded": len(database),
-        "endpoints": {
-            "POST /detect":      "Detect logo — public",
-            "GET  /brands":      "List brands — public",
-            "POST /add-brand":   "Add brand — API key required",
-            "DELETE /brand/<n>": "Remove brand — API key required",
-            "GET  /health":      "Health check"
-        }
-    })
+    return send_from_directory('.', 'index.html')
 
 @app.route("/health")
 @limiter.exempt
@@ -249,11 +238,11 @@ def detect():
     try:
         if "image" not in request.files:
             return jsonify({"success":False,
-                "error":"No image. Send multipart/form-data with field 'image'."}),400
+                "error":"No image. Send multipart/form-data field 'image'."}),400
         raw = request.files["image"].read()
         img = validate_image(raw)
         result = run_detection(img)
-        logger.info(f"DETECT {result['verdict']} score={result['similarity_score']} brand={result['matched_brand']}")
+        logger.info(f"DETECT {result['verdict']} score={result['similarity_score']}")
         return jsonify({"success":True,"result":result})
     except ValueError as e:
         return jsonify({"success":False,"error":str(e)}),400
@@ -275,33 +264,27 @@ def add_brand():
         name = request.form.get("brand_name","").strip().lower()
         if not name:
             return jsonify({"success":False,"error":"brand_name required."}),400
-        if len(name) > 50:
-            return jsonify({"success":False,"error":"brand_name too long."}),400
         if "image" not in request.files:
             return jsonify({"success":False,"error":"image required."}),400
         raw = request.files["image"].read()
         img = validate_image(raw)
         database[name] = extractor.extract_from_pil(img)
         save_database()
-        logger.info(f"ADD '{name}' — total: {len(database)}")
         return jsonify({"success":True,"message":f"'{name}' added.",
                         "total_brands":len(database)}),201
     except ValueError as e:
         return jsonify({"success":False,"error":str(e)}),400
     except Exception as e:
-        logger.error(f"ADD error: {e}")
         return jsonify({"success":False,"error":"Failed to add brand."}),500
 
 @app.route("/brand/<brand_name>", methods=["DELETE"])
 @require_api_key
-@limiter.limit("20 per hour")
 def remove_brand(brand_name):
     key = brand_name.lower().strip()
     if key not in database:
         return jsonify({"success":False,"error":f"'{key}' not found."}),404
     del database[key]
     save_database()
-    logger.info(f"DEL '{key}' — remaining: {len(database)}")
     return jsonify({"success":True,"message":f"'{key}' removed.",
                     "remaining":len(database)})
 
