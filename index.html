@@ -1,847 +1,578 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fake Logo Detector — AI-Powered Brand Authentication</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --primary: #6366f1;
-            --primary-dark: #4f46e5;
-            --primary-light: #818cf8;
-            --success: #10b981;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-            --bg: #0f0f1a;
-            --bg-card: rgba(255, 255, 255, 0.03);
-            --bg-hover: rgba(255, 255, 255, 0.06);
-            --border: rgba(255, 255, 255, 0.08);
-            --text: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --text-muted: #64748b;
-            --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            --glow: 0 0 40px rgba(99, 102, 241, 0.15);
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-            overflow-x: hidden;
-            line-height: 1.6;
-        }
-
-        /* Animated background */
-        .bg-mesh {
-            position: fixed;
-            inset: 0;
-            z-index: 0;
-            overflow: hidden;
-        }
-
-        .bg-mesh::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: 
-                radial-gradient(circle at 20% 80%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
-                radial-gradient(circle at 80% 20%, rgba(16, 185, 129, 0.1) 0%, transparent 50%),
-                radial-gradient(circle at 50% 50%, rgba(239, 68, 68, 0.05) 0%, transparent 50%);
-            animation: meshMove 20s ease-in-out infinite;
-        }
-
-        @keyframes meshMove {
-            0%, 100% { transform: translate(0, 0) rotate(0deg); }
-            33% { transform: translate(30px, -30px) rotate(1deg); }
-            66% { transform: translate(-20px, 20px) rotate(-1deg); }
-        }
-
-        .grid-pattern {
-            position: fixed;
-            inset: 0;
-            z-index: 1;
-            background-image: 
-                linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
-            background-size: 60px 60px;
-            mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
-        }
-
-        /* Layout */
-        .container {
-            position: relative;
-            z-index: 2;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-
-        /* Header */
-        header {
-            text-align: center;
-            padding: 3rem 0 4rem;
-            animation: fadeInDown 0.8s ease-out;
-        }
-
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 1rem;
-            background: rgba(99, 102, 241, 0.1);
-            border: 1px solid rgba(99, 102, 241, 0.2);
-            border-radius: 100px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: var(--primary-light);
-            margin-bottom: 1.5rem;
-        }
-
-        .badge::before {
-            content: '';
-            width: 6px;
-            height: 6px;
-            background: var(--success);
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        h1 {
-            font-size: clamp(2.5rem, 6vw, 4.5rem);
-            font-weight: 800;
-            line-height: 1.1;
-            margin-bottom: 1rem;
-            background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .subtitle {
-            font-size: 1.125rem;
-            color: var(--text-secondary);
-            max-width: 600px;
-            margin: 0 auto;
-            font-weight: 400;
-        }
-
-        /* Main Card */
-        .main-card {
-            background: var(--bg-card);
-            backdrop-filter: blur(20px);
-            border: 1px solid var(--border);
-            border-radius: 24px;
-            padding: 2.5rem;
-            margin-bottom: 2rem;
-            box-shadow: var(--shadow), var(--glow);
-            animation: fadeInUp 0.8s ease-out 0.2s both;
-        }
-
-        /* Upload Zone */
-        .upload-zone {
-            position: relative;
-            border: 2px dashed rgba(99, 102, 241, 0.3);
-            border-radius: 20px;
-            padding: 3rem 2rem;
-            text-align: center;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            background: rgba(99, 102, 241, 0.02);
-            overflow: hidden;
-        }
-
-        .upload-zone::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(99, 102, 241, 0.1), transparent 50%);
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-
-        .upload-zone:hover::before {
-            opacity: 1;
-        }
-
-        .upload-zone:hover, .upload-zone.dragover {
-            border-color: var(--primary);
-            background: rgba(99, 102, 241, 0.05);
-            transform: translateY(-2px);
-        }
-
-        .upload-zone.dragover {
-            border-style: solid;
-            background: rgba(99, 102, 241, 0.08);
-        }
-
-        .upload-icon {
-            width: 64px;
-            height: 64px;
-            margin: 0 auto 1.5rem;
-            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
-            border-radius: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.3);
-            transition: transform 0.3s ease;
-        }
-
-        .upload-zone:hover .upload-icon {
-            transform: scale(1.1) rotate(-5deg);
-        }
-
-        .upload-icon svg {
-            width: 28px;
-            height: 28px;
-            color: white;
-        }
-
-        .upload-text {
-            font-size: 1.125rem;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-        }
-
-        .upload-hint {
-            font-size: 0.875rem;
-            color: var(--text-muted);
-        }
-
-        .file-input {
-            display: none;
-        }
-
-        /* Preview */
-        .preview-container {
-            display: none;
-            margin-top: 2rem;
-            animation: fadeIn 0.4s ease;
-        }
-
-        .preview-container.active {
-            display: block;
-        }
-
-        .preview-wrapper {
-            position: relative;
-            display: inline-block;
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-        }
-
-        .preview-image {
-            max-width: 100%;
-            max-height: 400px;
-            display: block;
-        }
-
-        .remove-btn {
-            position: absolute;
-            top: 1rem;
-            right: 1rem;
-            width: 36px;
-            height: 36px;
-            background: rgba(0,0,0,0.6);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 10px;
-            color: white;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-        }
-
-        .remove-btn:hover {
-            background: var(--danger);
-            transform: scale(1.1);
-        }
-
-        /* Detect Button */
-        .detect-btn {
-            width: 100%;
-            margin-top: 2rem;
-            padding: 1.25rem 2rem;
-            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
-            border: none;
-            border-radius: 16px;
-            color: white;
-            font-size: 1.125rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.3);
-        }
-
-        .detect-btn::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-            transition: left 0.5s;
-        }
-
-        .detect-btn:hover::before {
-            left: 100%;
-        }
-
-        .detect-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 20px 40px rgba(99, 102, 241, 0.4);
-        }
-
-        .detect-btn:active {
-            transform: translateY(0);
-        }
-
-        .detect-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .detect-btn .spinner {
-            display: none;
-            width: 20px;
-            height: 20px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-top-color: white;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            margin-right: 0.75rem;
-            vertical-align: middle;
-        }
-
-        .detect-btn.loading .spinner {
-            display: inline-block;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* Results */
-        .results {
-            display: none;
-            margin-top: 2rem;
-            animation: fadeInUp 0.5s ease;
-        }
-
-        .results.active {
-            display: block;
-        }
-
-        .result-card {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 2rem;
-            text-align: center;
-        }
-
-        .result-icon {
-            width: 80px;
-            height: 80px;
-            margin: 0 auto 1.5rem;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 2.5rem;
-        }
-
-        .result-icon.authentic {
-            background: rgba(16, 185, 129, 0.1);
-            border: 2px solid var(--success);
-            color: var(--success);
-        }
-
-        .result-icon.fake {
-            background: rgba(239, 68, 68, 0.1);
-            border: 2px solid var(--danger);
-            color: var(--danger);
-        }
-
-        .result-title {
-            font-size: 1.5rem;
-            font-weight: 700;
-            margin-bottom: 0.5rem;
-        }
-
-        .result-confidence {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 3rem;
-            font-weight: 700;
-            margin: 1rem 0;
-        }
-
-        .result-confidence.authentic {
-            color: var(--success);
-        }
-
-        .result-confidence.fake {
-            color: var(--danger);
-        }
-
-        .result-meta {
-            color: var(--text-secondary);
-            font-size: 0.875rem;
-        }
-
-        /* Brands Section */
-        .brands-section {
-            animation: fadeInUp 0.8s ease-out 0.4s both;
-        }
-
-        .section-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 1.5rem;
-        }
-
-        .section-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
-
-        .section-title svg {
-            color: var(--primary-light);
-        }
-
-        .brand-count {
-            font-size: 0.875rem;
-            color: var(--text-muted);
-            background: var(--bg-card);
-            padding: 0.375rem 1rem;
-            border-radius: 100px;
-            border: 1px solid var(--border);
-        }
-
-        .brands-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            gap: 1rem;
-        }
-
-        .brand-item {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 1.25rem 1rem;
-            text-align: center;
-            transition: all 0.3s ease;
-            cursor: default;
-        }
-
-        .brand-item:hover {
-            background: var(--bg-hover);
-            border-color: rgba(99, 102, 241, 0.3);
-            transform: translateY(-3px);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
-
-        .brand-logo {
-            width: 48px;
-            height: 48px;
-            margin: 0 auto 0.75rem;
-            background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(99,102,241,0.05));
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: var(--primary-light);
-        }
-
-        .brand-name {
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: var(--text);
-        }
-
-        .brand-loading, .brand-error {
-            grid-column: 1 / -1;
-            text-align: center;
-            padding: 3rem;
-            color: var(--text-muted);
-        }
-
-        .brand-error {
-            color: var(--danger);
-        }
-
-        /* Footer */
-        footer {
-            text-align: center;
-            padding: 3rem 0 2rem;
-            color: var(--text-muted);
-            font-size: 0.875rem;
-            animation: fadeIn 1s ease-out 0.6s both;
-        }
-
-        footer a {
-            color: var(--primary-light);
-            text-decoration: none;
-            font-weight: 500;
-            transition: color 0.2s;
-        }
-
-        footer a:hover {
-            color: var(--primary);
-            text-decoration: underline;
-        }
-
-        .divider {
-            margin: 0 0.75rem;
-            opacity: 0.3;
-        }
-
-        /* Animations */
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        @keyframes fadeInDown {
-            from { opacity: 0; transform: translateY(-20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .container {
-                padding: 1rem;
-            }
-            
-            .main-card {
-                padding: 1.5rem;
-            }
-            
-            .upload-zone {
-                padding: 2rem 1rem;
-            }
-            
-            h1 {
-                font-size: 2rem;
-            }
-        }
-
-        /* Toast notification */
-        .toast {
-            position: fixed;
-            bottom: 2rem;
-            left: 50%;
-            transform: translateX(-50%) translateY(100px);
-            background: rgba(239, 68, 68, 0.95);
-            color: white;
-            padding: 1rem 2rem;
-            border-radius: 12px;
-            font-weight: 500;
-            box-shadow: 0 10px 30px rgba(239, 68, 68, 0.3);
-            z-index: 1000;
-            opacity: 0;
-            transition: all 0.3s ease;
-        }
-
-        .toast.show {
-            transform: translateX(-50%) translateY(0);
-            opacity: 1;
-        }
-
-        .toast.success {
-            background: rgba(16, 185, 129, 0.95);
-            box-shadow: 0 10px 30px rgba(16, 185, 129, 0.3);
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fake Logo Detector — Angry Birds Edition</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800&display=swap');
+
+*{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  font-family:'Nunito',sans-serif;
+  min-height:100vh;
+  background:#1a0a00;
+  overflow-x:hidden;
+  position:relative;
+}
+
+/* ── Sky background ── */
+.sky{
+  position:fixed;top:0;left:0;width:100%;height:100%;
+  background:linear-gradient(180deg,#0a1628 0%,#1a2d5a 40%,#2d1a00 70%,#1a0a00 100%);
+  z-index:0;
+}
+
+/* ── Stars ── */
+.stars{position:fixed;top:0;left:0;width:100%;height:60%;z-index:1;pointer-events:none}
+.star{position:absolute;background:#fff;border-radius:50%;animation:twinkle 2s infinite alternate}
+@keyframes twinkle{0%{opacity:.2;transform:scale(1)}100%{opacity:1;transform:scale(1.3)}}
+
+/* ── Ground ── */
+.ground{
+  position:fixed;bottom:0;left:0;width:100%;height:80px;
+  background:linear-gradient(180deg,#2d5a00 0%,#1a3a00 100%);
+  z-index:1;
+  border-top:4px solid #4a8a00;
+}
+.ground::before{
+  content:'';position:absolute;top:-20px;left:0;width:100%;height:24px;
+  background:radial-gradient(ellipse 40px 20px at 20% 100%,#3a7a00 50%,transparent 50%),
+             radial-gradient(ellipse 60px 24px at 50% 100%,#4a8a00 50%,transparent 50%),
+             radial-gradient(ellipse 30px 16px at 80% 100%,#3a7a00 50%,transparent 50%);
+}
+
+/* ── Slingshot ── */
+.slingshot{
+  position:fixed;bottom:70px;left:60px;width:50px;height:100px;z-index:2;
+  pointer-events:none;
+}
+.slingshot::before{
+  content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%);
+  width:8px;height:80px;
+  background:linear-gradient(90deg,#8B4513,#A0522D,#8B4513);
+  border-radius:4px;
+}
+.slingshot::after{
+  content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:40px;height:30px;
+  border:6px solid #A0522D;
+  border-bottom:none;
+  border-radius:20px 20px 0 0;
+}
+
+/* ── Clouds ── */
+.cloud{
+  position:fixed;z-index:2;pointer-events:none;
+  background:#fff;border-radius:50px;opacity:.15;
+  animation:float linear infinite;
+}
+@keyframes float{0%{transform:translateX(-200px)}100%{transform:translateX(110vw)}}
+
+/* ── Pig tower ── */
+.pig-tower{
+  position:fixed;right:80px;bottom:70px;z-index:2;
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  pointer-events:none;
+}
+.plank{width:60px;height:12px;background:linear-gradient(90deg,#8B6914,#C8A020,#8B6914);border-radius:3px;border:1px solid #6B4A0A}
+.pig{
+  width:36px;height:36px;background:radial-gradient(circle at 40% 35%,#90EE5A,#4CAF20);
+  border-radius:50%;border:2px solid #2d7a00;
+  display:flex;align-items:center;justify-content:center;font-size:16px;
+  position:relative;
+}
+.pig::before{content:'👀';font-size:10px;position:absolute;top:6px}
+.pig::after{content:'🐽';font-size:9px;position:absolute;bottom:5px}
+
+/* ── Main container ── */
+.container{
+  position:relative;z-index:10;
+  max-width:600px;margin:0 auto;
+  padding:20px 16px 120px;
+}
+
+/* ── Header ── */
+.header{text-align:center;padding:30px 0 24px}
+.bird-logo{font-size:72px;margin-bottom:8px;display:block;animation:bounce 1.5s ease-in-out infinite}
+@keyframes bounce{0%,100%{transform:translateY(0) rotate(-5deg)}50%{transform:translateY(-12px) rotate(5deg)}}
+.header h1{
+  font-family:'Fredoka One',cursive;
+  font-size:36px;color:#ff6b00;
+  text-shadow:3px 3px 0 #8B2500,0 0 20px #ff4400;
+  margin-bottom:6px;letter-spacing:1px;
+}
+.header p{font-size:14px;color:#ffaa55;font-weight:600}
+.header .subtitle{
+  display:inline-block;margin-top:8px;
+  background:#ff6b00;color:#fff;
+  font-size:12px;font-weight:700;
+  padding:4px 14px;border-radius:99px;
+  text-transform:uppercase;letter-spacing:1px;
+}
+
+/* ── Card ── */
+.card{
+  background:rgba(255,255,255,0.07);
+  border:2px solid rgba(255,107,0,0.3);
+  border-radius:24px;
+  padding:24px;
+  margin-bottom:16px;
+  backdrop-filter:blur(10px);
+  box-shadow:0 8px 32px rgba(255,107,0,0.1);
+}
+
+/* ── Upload box ── */
+.upload-box{
+  border:3px dashed rgba(255,107,0,0.4);
+  border-radius:20px;
+  padding:36px 20px;
+  text-align:center;
+  cursor:pointer;
+  transition:all .25s;
+  background:rgba(255,107,0,0.05);
+  position:relative;
+  overflow:hidden;
+}
+.upload-box:hover{
+  border-color:#ff6b00;
+  background:rgba(255,107,0,0.12);
+  transform:scale(1.01);
+}
+.upload-box.dragover{
+  border-color:#ffcc00;
+  background:rgba(255,204,0,0.1);
+  transform:scale(1.02);
+}
+.upload-bird{font-size:52px;margin-bottom:10px;display:block;transition:transform .2s}
+.upload-box:hover .upload-bird{transform:scale(1.15) rotate(-10deg)}
+.upload-box h3{font-size:16px;font-weight:700;color:#ffcc00;margin-bottom:4px;font-family:'Fredoka One',cursive}
+.upload-box p{font-size:12px;color:#ff9944}
+
+/* ── Preview ── */
+.preview{display:none;text-align:center;margin-bottom:16px}
+.preview-wrapper{
+  display:inline-block;
+  padding:8px;border-radius:16px;
+  background:rgba(255,107,0,0.1);
+  border:2px solid rgba(255,107,0,0.3);
+}
+.preview img{
+  max-width:160px;max-height:160px;
+  border-radius:12px;object-fit:contain;
+  background:#1a1a1a;display:block;
+}
+.preview p{font-size:12px;color:#ff9944;margin-top:8px;font-weight:600}
+
+/* ── Buttons ── */
+.btn-detect{
+  width:100%;padding:16px;border-radius:16px;border:none;
+  font-family:'Fredoka One',cursive;
+  font-size:20px;letter-spacing:1px;
+  cursor:pointer;transition:all .2s;
+  background:linear-gradient(135deg,#ff6b00,#ff3300);
+  color:#fff;
+  box-shadow:0 6px 0 #8B2500,0 8px 20px rgba(255,107,0,0.4);
+  text-shadow:1px 1px 0 rgba(0,0,0,0.3);
+  margin-bottom:10px;
+}
+.btn-detect:hover:not(:disabled){
+  transform:translateY(-2px);
+  box-shadow:0 8px 0 #8B2500,0 12px 24px rgba(255,107,0,0.5);
+}
+.btn-detect:active:not(:disabled){
+  transform:translateY(4px);
+  box-shadow:0 2px 0 #8B2500;
+}
+.btn-detect:disabled{
+  background:linear-gradient(135deg,#555,#333);
+  color:#888;cursor:not-allowed;
+  box-shadow:0 4px 0 #222;
+}
+.btn-clear{
+  width:100%;padding:12px;border-radius:14px;
+  border:2px solid rgba(255,107,0,0.3);
+  background:transparent;color:#ff9944;
+  font-size:14px;font-weight:700;cursor:pointer;
+  transition:all .2s;display:none;
+}
+.btn-clear:hover{background:rgba(255,107,0,0.1);border-color:#ff6b00}
+
+/* ── Loading ── */
+.loading{display:none;text-align:center;padding:24px 0}
+.bird-spin{font-size:48px;display:block;animation:spin-fly 0.6s linear infinite}
+@keyframes spin-fly{0%{transform:rotate(0deg) scale(1)}50%{transform:rotate(180deg) scale(1.2)}100%{transform:rotate(360deg) scale(1)}}
+.loading p{font-size:14px;color:#ffaa55;font-weight:600;margin-top:8px}
+
+/* ── Result ── */
+.result{display:none;border-radius:20px;padding:24px;text-align:center;margin-top:8px}
+.result.authentic{
+  background:linear-gradient(135deg,rgba(0,180,0,0.15),rgba(0,100,0,0.15));
+  border:2px solid #00cc44;
+}
+.result.fake{
+  background:linear-gradient(135deg,rgba(255,0,0,0.15),rgba(150,0,0,0.15));
+  border:2px solid #ff3333;
+}
+.result.unknown{
+  background:linear-gradient(135deg,rgba(255,200,0,0.15),rgba(150,100,0,0.15));
+  border:2px solid #ffcc00;
+}
+.result-emoji{font-size:64px;margin-bottom:10px;display:block;animation:pop .4s cubic-bezier(0.175,0.885,0.32,1.275)}
+@keyframes pop{0%{transform:scale(0)}100%{transform:scale(1)}}
+.result-verdict{
+  font-family:'Fredoka One',cursive;
+  font-size:32px;margin-bottom:6px;
+}
+.result.authentic .result-verdict{color:#00ff66;text-shadow:0 0 20px #00cc44}
+.result.fake .result-verdict{color:#ff4444;text-shadow:0 0 20px #cc0000}
+.result.unknown .result-verdict{color:#ffcc00;text-shadow:0 0 20px #cc9900}
+.result-msg{font-size:14px;font-weight:600;margin-bottom:16px;opacity:.85}
+.result.authentic .result-msg{color:#88ffaa}
+.result.fake .result-msg{color:#ffaaaa}
+.result.unknown .result-msg{color:#ffeeaa}
+
+/* ── Score bar ── */
+.score-label{display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:6px}
+.score-bar-bg{background:rgba(0,0,0,0.3);border-radius:99px;height:12px;overflow:hidden;margin-bottom:16px;border:1px solid rgba(255,255,255,0.1)}
+.score-bar{height:100%;border-radius:99px;transition:width 1.2s cubic-bezier(0.22,1,0.36,1)}
+.result.authentic .score-bar{background:linear-gradient(90deg,#00cc44,#00ff88)}
+.result.fake .score-bar{background:linear-gradient(90deg,#cc0000,#ff4444)}
+.result.unknown .score-bar{background:linear-gradient(90deg,#cc9900,#ffcc00)}
+
+/* ── Detail cards ── */
+.result-details{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.detail-card{
+  background:rgba(0,0,0,0.25);
+  border-radius:12px;padding:12px;
+  border:1px solid rgba(255,255,255,0.08);
+}
+.detail-label{font-size:11px;color:rgba(255,255,255,0.4);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.detail-value{font-size:16px;font-weight:800;color:#fff}
+
+/* ── Error ── */
+.error-box{
+  display:none;background:rgba(255,0,0,0.1);
+  border:2px solid #cc0000;border-radius:14px;
+  padding:14px 16px;margin-top:12px;
+  font-size:13px;color:#ff8888;font-weight:600;
+  text-align:center;
+}
+
+/* ── Brands ── */
+.brands-section{margin-top:8px}
+.brands-header{
+  font-family:'Fredoka One',cursive;
+  font-size:16px;color:#ffcc00;
+  text-align:center;margin-bottom:12px;
+}
+.brands-list{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.brand-pill{
+  font-size:11px;padding:5px 12px;
+  border-radius:99px;font-weight:700;
+  background:rgba(255,107,0,0.1);
+  border:1px solid rgba(255,107,0,0.25);
+  color:#ffaa55;transition:all .15s;cursor:default;
+}
+.brand-pill:hover{background:rgba(255,107,0,0.25);border-color:#ff6b00;color:#ffcc00}
+
+/* ── Footer ── */
+.footer{
+  text-align:center;padding:20px 0 10px;
+  font-size:12px;color:rgba(255,170,85,0.5);font-weight:600;
+}
+.footer a{color:#ff6b00;text-decoration:none}
+.footer a:hover{color:#ffcc00}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:#1a0a00}
+::-webkit-scrollbar-thumb{background:#ff6b00;border-radius:3px}
+</style>
 </head>
 <body>
-    <div class="bg-mesh"></div>
-    <div class="grid-pattern"></div>
 
-    <div class="container">
-        <header>
-            <div class="badge">AI Powered</div>
-            <h1>Fake Logo Detector</h1>
-            <p class="subtitle">Upload a brand logo to verify its authenticity using advanced CLIP vision analysis. Detect counterfeit branding in seconds.</p>
-        </header>
+<div class="sky"></div>
+<div class="stars" id="stars"></div>
 
-        <main class="main-card">
-            <div class="upload-zone" id="uploadZone">
-                <div class="upload-icon">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-                    </svg>
-                </div>
-                <div class="upload-text">Drop your logo here or click to browse</div>
-                <div class="upload-hint">PNG, JPG, WEBP supported — max 10MB</div>
-                <input type="file" class="file-input" id="fileInput" accept="image/png,image/jpeg,image/jpg,image/webp">
-            </div>
+<!-- Clouds -->
+<div class="cloud" style="width:120px;height:40px;top:8%;animation-duration:30s;animation-delay:0s"></div>
+<div class="cloud" style="width:80px;height:28px;top:15%;animation-duration:45s;animation-delay:-15s"></div>
+<div class="cloud" style="width:160px;height:50px;top:5%;animation-duration:60s;animation-delay:-30s"></div>
 
-            <div class="preview-container" id="previewContainer">
-                <div class="preview-wrapper">
-                    <img class="preview-image" id="previewImage" src="" alt="Preview">
-                    <button class="remove-btn" id="removeBtn" title="Remove image">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                            <path d="M18 6L6 18M6 6l12 12"/>
-                        </svg>
-                    </button>
-                </div>
-            </div>
+<!-- Slingshot -->
+<div class="slingshot"></div>
 
-            <button class="detect-btn" id="detectBtn" disabled>
-                <span class="spinner"></span>
-                <span class="btn-text">Detect Logo</span>
-            </button>
+<!-- Pig Tower -->
+<div class="pig-tower">
+  <div class="pig"></div>
+  <div class="plank"></div>
+  <div class="pig"></div>
+  <div class="plank"></div>
+  <div class="plank"></div>
+</div>
 
-            <div class="results" id="results">
-                <div class="result-card">
-                    <div class="result-icon" id="resultIcon">✓</div>
-                    <div class="result-title" id="resultTitle">Authentic Brand</div>
-                    <div class="result-confidence" id="resultConfidence">94%</div>
-                    <div class="result-meta" id="resultMeta">Confidence score based on CLIP ViT-B/32 analysis</div>
-                </div>
-            </div>
-        </main>
+<!-- Ground -->
+<div class="ground"></div>
 
-        <section class="brands-section">
-            <div class="section-header">
-                <h2 class="section-title">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-                    </svg>
-                    Supported Brands
-                </h2>
-                <span class="brand-count" id="brandCount">Loading...</span>
-            </div>
-            <div class="brands-grid" id="brandsGrid">
-                <div class="brand-loading">Loading brands...</div>
-            </div>
-        </section>
+<div class="container">
 
-        <footer>
-            Built by <a href="#">Gunasekar</a>
-            <span class="divider">|</span>
-            Powered by <a href="#">CLIP ViT-B/32</a>
-            <span class="divider">|</span>
-            <a href="#">GitHub</a>
-        </footer>
+  <!-- Header -->
+  <div class="header">
+    <span class="bird-logo">🐦</span>
+    <h1>LOGO DETECTOR</h1>
+    <p>Angry Birds — Brand Authentication System</p>
+    <span class="subtitle">Powered by CLIP AI</span>
+  </div>
+
+  <!-- Upload card -->
+  <div class="card">
+    <div class="upload-box" id="uploadBox">
+      <span class="upload-bird">🐦</span>
+      <h3>Launch Your Logo!</h3>
+      <p>Click to select or drag &amp; drop — PNG, JPG, WEBP, max 10MB</p>
+      <input type="file" id="fileInput" accept="image/png,image/jpeg,image/jpg,image/webp,image/bmp" style="display:none">
     </div>
 
-    <div class="toast" id="toast"></div>
+    <div class="preview" id="preview">
+      <div class="preview-wrapper">
+        <img id="previewImg" src="" alt="Logo preview">
+      </div>
+      <p id="previewName"></p>
+    </div>
 
-    <script>
-        // Mouse tracking for upload zone glow effect
-        const uploadZone = document.getElementById('uploadZone');
-        uploadZone.addEventListener('mousemove', (e) => {
-            const rect = uploadZone.getBoundingClientRect();
-            const x = ((e.clientX - rect.left) / rect.width) * 100;
-            const y = ((e.clientY - rect.top) / rect.height) * 100;
-            uploadZone.style.setProperty('--mouse-x', x + '%');
-            uploadZone.style.setProperty('--mouse-y', y + '%');
-        });
+    <div class="error-box" id="errorBox"></div>
 
-        // File handling
-        const fileInput = document.getElementById('fileInput');
-        const previewContainer = document.getElementById('previewContainer');
-        const previewImage = document.getElementById('previewImage');
-        const removeBtn = document.getElementById('removeBtn');
-        const detectBtn = document.getElementById('detectBtn');
-        const results = document.getElementById('results');
+    <div style="margin-top:16px">
+      <button class="btn-detect" id="detectBtn" disabled>🎯 FIRE! Detect Logo</button>
+      <button class="btn-clear" id="clearBtn">✕ Clear &amp; Reset</button>
+    </div>
+  </div>
 
-        uploadZone.addEventListener('click', () => fileInput.click());
+  <!-- Loading -->
+  <div class="loading" id="loading">
+    <span class="bird-spin">🐦</span>
+    <p>Bird is flying... Analysing logo with AI!</p>
+  </div>
 
-        uploadZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadZone.classList.add('dragover');
-        });
+  <!-- Result card -->
+  <div class="result" id="result">
+    <span class="result-emoji" id="resultEmoji"></span>
+    <div class="result-verdict" id="resultVerdict"></div>
+    <div class="result-msg" id="resultMsg"></div>
+    <div class="score-label">
+      <span style="color:rgba(255,255,255,0.5)">Similarity</span>
+      <span id="scoreText" style="color:#fff;font-weight:800"></span>
+    </div>
+    <div class="score-bar-bg">
+      <div class="score-bar" id="scoreBar" style="width:0%"></div>
+    </div>
+    <div class="result-details">
+      <div class="detail-card">
+        <div class="detail-label">Score</div>
+        <div class="detail-value" id="detailScore"></div>
+      </div>
+      <div class="detail-card">
+        <div class="detail-label">Matched brand</div>
+        <div class="detail-value" id="detailBrand"></div>
+      </div>
+    </div>
+  </div>
 
-        uploadZone.addEventListener('dragleave', () => {
-            uploadZone.classList.remove('dragover');
-        });
+  <!-- Brands -->
+  <div class="card brands-section">
+    <div class="brands-header">🐷 50 Brands in the Pig Castle</div>
+    <div class="brands-list" id="brandsList">
+      <div class="brand-pill">Loading...</div>
+    </div>
+  </div>
 
-        uploadZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadZone.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files.length) handleFile(files[0]);
-        });
+  <div class="footer">
+    Built by <strong style="color:#ff6b00">Gunasekar</strong> &nbsp;|&nbsp;
+    CLIP ViT-B/32 &nbsp;|&nbsp;
+    <a href="https://github.com/gunasekar05042005-dot/Fake-Logo-Detector" target="_blank">GitHub ↗</a>
+  </div>
 
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length) handleFile(e.target.files[0]);
-        });
+</div>
 
-        let currentFile = null;
+<script>
+  // ── Stars ─────────────────────────────────
+  (function(){
+    var s=document.getElementById('stars');
+    for(var i=0;i<80;i++){
+      var d=document.createElement('div');
+      d.className='star';
+      var size=Math.random()*3+1;
+      d.style.cssText='width:'+size+'px;height:'+size+'px;'
+        +'top:'+Math.random()*100+'%;left:'+Math.random()*100+'%;'
+        +'animation-delay:'+Math.random()*3+'s;'
+        +'animation-duration:'+(1.5+Math.random()*2)+'s';
+      s.appendChild(d);
+    }
+  })();
 
-        function handleFile(file) {
-            if (!file.type.startsWith('image/')) {
-                showToast('Please upload an image file', 'error');
-                return;
-            }
-            if (file.size > 10 * 1024 * 1024) {
-                showToast('File size must be less than 10MB', 'error');
-                return;
-            }
+  var selectedFile=null;
+  var fileInput=document.getElementById('fileInput');
+  var uploadBox=document.getElementById('uploadBox');
+  var preview=document.getElementById('preview');
+  var previewImg=document.getElementById('previewImg');
+  var previewName=document.getElementById('previewName');
+  var detectBtn=document.getElementById('detectBtn');
+  var clearBtn=document.getElementById('clearBtn');
+  var errorBox=document.getElementById('errorBox');
 
-            currentFile = file;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                previewImage.src = e.target.result;
-                previewContainer.classList.add('active');
-                detectBtn.disabled = false;
-                results.classList.remove('active');
-            };
-            reader.readAsDataURL(file);
-        }
+  uploadBox.addEventListener('click',function(){fileInput.click()});
 
-        removeBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            currentFile = null;
-            fileInput.value = '';
-            previewContainer.classList.remove('active');
-            detectBtn.disabled = true;
-            results.classList.remove('active');
-        });
+  fileInput.addEventListener('change',function(){
+    if(fileInput.files&&fileInput.files[0]){
+      selectedFile=fileInput.files[0];
+      showPreview(selectedFile);
+    }
+  });
 
-        // Detection
-        detectBtn.addEventListener('click', async () => {
-            if (!currentFile) return;
+  uploadBox.addEventListener('dragover',function(e){
+    e.preventDefault();e.stopPropagation();
+    uploadBox.classList.add('dragover');
+  });
 
-            detectBtn.classList.add('loading');
-            detectBtn.disabled = true;
-            const btnText = detectBtn.querySelector('.btn-text');
-            btnText.textContent = 'Analyzing...';
+  uploadBox.addEventListener('dragleave',function(e){
+    e.preventDefault();
+    uploadBox.classList.remove('dragover');
+  });
 
-            try {
-                const formData = new FormData();
-                formData.append('image', currentFile);
+  uploadBox.addEventListener('drop',function(e){
+    e.preventDefault();e.stopPropagation();
+    uploadBox.classList.remove('dragover');
+    if(e.dataTransfer.files&&e.dataTransfer.files[0]){
+      selectedFile=e.dataTransfer.files[0];
+      showPreview(selectedFile);
+    }
+  });
 
-                const response = await fetch('/detect', {
-                    method: 'POST',
-                    body: formData
-                });
+  function showPreview(file){
+    var reader=new FileReader();
+    reader.onload=function(e){
+      previewImg.src=e.target.result;
+      previewName.textContent=file.name+' ('+(file.size/1024).toFixed(1)+' KB)';
+      preview.style.display='block';
+      detectBtn.disabled=false;
+      clearBtn.style.display='block';
+      document.getElementById('result').style.display='none';
+      document.getElementById('loading').style.display='none';
+      errorBox.style.display='none';
+    };
+    reader.readAsDataURL(file);
+  }
 
-                if (!response.ok) throw new Error('Detection failed');
+  clearBtn.addEventListener('click',function(){
+    selectedFile=null;fileInput.value='';
+    preview.style.display='none';
+    detectBtn.disabled=true;
+    clearBtn.style.display='none';
+    document.getElementById('result').style.display='none';
+    document.getElementById('loading').style.display='none';
+    errorBox.style.display='none';
+  });
 
-                const data = await response.json();
-                showResults(data);
-            } catch (error) {
-                showToast('Detection failed. Please try again.', 'error');
-                console.error(error);
-            } finally {
-                detectBtn.classList.remove('loading');
-                detectBtn.disabled = false;
-                btnText.textContent = 'Detect Logo';
-            }
-        });
+  detectBtn.addEventListener('click',function(){
+    if(!selectedFile){showError('Please select a logo image first!');return;}
+    runDetection();
+  });
 
-        function showResults(data) {
-            const resultIcon = document.getElementById('resultIcon');
-            const resultTitle = document.getElementById('resultTitle');
-            const resultConfidence = document.getElementById('resultConfidence');
-            const resultMeta = document.getElementById('resultMeta');
+  function runDetection(){
+    detectBtn.disabled=true;
+    document.getElementById('loading').style.display='block';
+    document.getElementById('result').style.display='none';
+    errorBox.style.display='none';
 
-            const isAuthentic = data.authentic || data.confidence > 0.5;
-            const confidence = Math.round((data.confidence || 0.94) * 100);
+    var formData=new FormData();
+    formData.append('image',selectedFile,selectedFile.name);
 
-            if (isAuthentic) {
-                resultIcon.textContent = '✓';
-                resultIcon.className = 'result-icon authentic';
-                resultTitle.textContent = 'Authentic Brand';
-                resultConfidence.className = 'result-confidence authentic';
-                resultMeta.textContent = `Detected as ${data.brand || 'verified brand'} with high confidence`;
-            } else {
-                resultIcon.textContent = '✕';
-                resultIcon.className = 'result-icon fake';
-                resultTitle.textContent = 'Potential Fake';
-                resultConfidence.className = 'result-confidence fake';
-                resultMeta.textContent = 'Low match confidence — possible counterfeit';
-            }
+    var xhr=new XMLHttpRequest();
+    xhr.open('POST','/detect',true);
 
-            resultConfidence.textContent = confidence + '%';
-            results.classList.add('active');
-            
-            // Scroll to results
-            results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
+    xhr.onload=function(){
+      document.getElementById('loading').style.display='none';
+      detectBtn.disabled=false;
+      if(xhr.status===200){
+        try{
+          var data=JSON.parse(xhr.responseText);
+          if(data.success){showResult(data.result);}
+          else{showError('Error: '+data.error);}
+        }catch(e){showError('Could not read server response.');}
+      } else {
+        try{
+          var err=JSON.parse(xhr.responseText);
+          showError('Server error: '+(err.error||xhr.status));
+        }catch(e){showError('Server error '+xhr.status);}
+      }
+    };
 
-        // Toast
-        function showToast(message, type = 'success') {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.className = 'toast show ' + type;
-            setTimeout(() => toast.classList.remove('show'), 3000);
-        }
+    xhr.onerror=function(){
+      document.getElementById('loading').style.display='none';
+      detectBtn.disabled=false;
+      showError('Network error. Check connection and try again.');
+    };
 
-        // Load brands
-        async function loadBrands() {
-            const grid = document.getElementById('brandsGrid');
-            const count = document.getElementById('brandCount');
+    xhr.send(formData);
+  }
 
-            try {
-                const response = await fetch('/brands');
-                if (!response.ok) throw new Error('Failed to load');
+  function showResult(r){
+    var resultDiv=document.getElementById('result');
+    var verdict=r.verdict;
+    var score=r.similarity_score;
 
-                const data = await response.json();
-                const brands = data.brands || [];
+    resultDiv.className='result '+verdict.toLowerCase();
+    resultDiv.style.display='block';
 
-                count.textContent = `${brands.length} brands`;
+    var emojis={
+      'AUTHENTIC': '🎉',
+      'FAKE':      '💥',
+      'UNKNOWN':   '🤔'
+    };
+    document.getElementById('resultEmoji').textContent=emojis[verdict]||'❓';
+    document.getElementById('resultVerdict').textContent=verdict;
+    document.getElementById('resultMsg').textContent=r.confidence+' confidence — '+r.message;
+    document.getElementById('detailScore').textContent=(score*100).toFixed(1)+'%';
+    document.getElementById('detailBrand').textContent=
+      r.matched_brand
+        ? r.matched_brand.charAt(0).toUpperCase()+r.matched_brand.slice(1)
+        : 'None';
+    document.getElementById('scoreText').textContent=(score*100).toFixed(1)+'%';
 
-                if (brands.length === 0) {
-                    grid.innerHTML = '<div class="brand-error">No brands available</div>';
-                    return;
-                }
+    setTimeout(function(){
+      document.getElementById('scoreBar').style.width=(score*100)+'%';
+    },100);
+  }
 
-                grid.innerHTML = brands.map(brand => `
-                    <div class="brand-item">
-                        <div class="brand-logo">${brand.charAt(0).toUpperCase()}</div>
-                        <div class="brand-name">${brand}</div>
-                    </div>
-                `).join('');
-            } catch (error) {
-                grid.innerHTML = '<div class="brand-error">Could not load brands</div>';
-                count.textContent = 'Error';
-            }
-        }
+  function showError(msg){
+    errorBox.textContent='💢 '+msg;
+    errorBox.style.display='block';
+  }
 
-        loadBrands();
-    </script>
+  function loadBrands(){
+    var xhr=new XMLHttpRequest();
+    xhr.open('GET','/brands',true);
+    xhr.onload=function(){
+      if(xhr.status===200){
+        try{
+          var data=JSON.parse(xhr.responseText);
+          var list=document.getElementById('brandsList');
+          list.innerHTML='';
+          data.brands.forEach(function(b){
+            var pill=document.createElement('div');
+            pill.className='brand-pill';
+            pill.textContent=b.charAt(0).toUpperCase()+b.slice(1);
+            list.appendChild(pill);
+          });
+        }catch(e){}
+      }
+    };
+    xhr.send();
+  }
+
+  loadBrands();
+</script>
 </body>
 </html>
