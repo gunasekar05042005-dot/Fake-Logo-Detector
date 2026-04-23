@@ -1,293 +1,207 @@
-import os, io, pickle, logging, time
-from datetime import datetime
-from functools import wraps
+# ╔══════════════════════════════════════════════════════════════════╗
+#  app.py — Fake Logo Detector
+#  Hugging Face Spaces (Gradio) + Full CLIP ViT-B/32
+#  100% free, accurate, no size limits
+# ╚══════════════════════════════════════════════════════════════════╝
 
+import os
+import io
+import pickle
 import numpy as np
 from PIL import Image
-from flask import Flask, request, jsonify, g, send_from_directory
-from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from dotenv import load_dotenv
+import gradio as gr
+import torch
+import open_clip
 
-load_dotenv()
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
-
-API_KEY          = os.environ.get("API_KEY", "change-me-secret")
-ALLOWED_ORIGINS  = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
-EMBEDDINGS_FILE  = os.environ.get("EMBEDDINGS_FILE", "./logo_embeddings_clip.pkl")
-MAX_UPLOAD_MB    = int(os.environ.get("MAX_UPLOAD_MB", "10"))
-RATE_LIMIT       = os.environ.get("RATE_LIMIT", "10 per minute")
-IS_VERCEL        = bool(os.environ.get("VERCEL", False))
-
+# ── Config ────────────────────────────────────
+EMBEDDINGS_FILE      = "logo_embeddings_clip.pkl"
+CLIP_MODEL_NAME      = "ViT-B-32"
+CLIP_PRETRAINED      = "openai"
 SIMILARITY_THRESHOLD = 0.80
 HIGH_CONF_THRESHOLD  = 0.88
 LOW_CONF_THRESHOLD   = 0.60
 
-IMAGE_SIGNATURES = {
-    b'\xff\xd8\xff': 'jpeg',
-    b'\x89PNG':      'png',
-    b'GIF8':         'gif',
-    b'RIFF':         'webp',
-    b'BM':           'bmp',
-}
+# ── Load CLIP ─────────────────────────────────
+print("Loading CLIP model...")
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model, _, preprocess = open_clip.create_model_and_transforms(
+    CLIP_MODEL_NAME, pretrained=CLIP_PRETRAINED
+)
+model.eval().to(device)
+print(f"CLIP ready on {device}")
 
-app = Flask(__name__, static_folder='.')
-app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
-CORS(app, origins=ALLOWED_ORIGINS)
-limiter = Limiter(get_remote_address, app=app,
-                  default_limits=[RATE_LIMIT], storage_uri="memory://")
-
-
-# ── Feature extractor ─────────────────────────
-class LightExtractor:
-    def extract_from_pil(self, img):
-        img = img.convert("RGB").resize((64, 64))
-        arr = np.array(img).astype(np.float32)
-        hist = []
-        for ch in range(3):
-            h, _ = np.histogram(arr[:,:,ch], bins=16, range=(0,255))
-            hist.extend(h.tolist())
-        gx = np.abs(np.diff(np.mean(arr,axis=2),axis=1)).mean()
-        gy = np.abs(np.diff(np.mean(arr,axis=2),axis=0)).mean()
-        vec = np.array(hist+[gx,gy,arr.mean()/255.0], dtype=np.float32)
-        norm = np.linalg.norm(vec)
-        return vec/norm if norm>0 else vec
-
-class CLIPExtractor:
-    def __init__(self):
-        import torch, open_clip
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model,_,self.preprocess = open_clip.create_model_and_transforms(
-            "ViT-B-32", pretrained="openai")
-        self.model.eval().to(self.device)
-        self.torch = torch
-    def extract_from_pil(self, img):
-        t = self.preprocess(img.convert("RGB")).unsqueeze(0).to(self.device)
-        with self.torch.no_grad():
-            f = self.model.encode_image(t)
-        vec = f.squeeze().float().cpu().numpy()
-        norm = np.linalg.norm(vec)
-        return vec/norm if norm>0 else vec
-
-def load_extractor():
-    if IS_VERCEL:
-        logger.info("Vercel — lightweight extractor")
-        return LightExtractor()
-    try:
-        e = CLIPExtractor()
-        logger.info("CLIP loaded")
-        return e
-    except Exception as ex:
-        logger.warning(f"CLIP failed — lightweight: {ex}")
-        return LightExtractor()
-
-extractor = load_extractor()
-
-
-# ── Database ──────────────────────────────────
-def load_database():
+# ── Load database ─────────────────────────────
+def load_db():
     if os.path.exists(EMBEDDINGS_FILE):
-        with open(EMBEDDINGS_FILE,"rb") as f:
+        with open(EMBEDDINGS_FILE, "rb") as f:
             db = pickle.load(f)
-        logger.info(f"DB loaded — {len(db)} brands")
+        print(f"Database loaded — {len(db)} brands")
         return db
-    logger.warning(f"No DB at {EMBEDDINGS_FILE}")
+    print("No database found")
     return {}
 
-database = load_database()
+database = load_db()
 
-def save_database():
-    with open(EMBEDDINGS_FILE,"wb") as f:
-        pickle.dump(database,f)
+# ── Extract embedding ──────────────────────────
+def extract(img: Image.Image) -> np.ndarray:
+    tensor = preprocess(img.convert("RGB")).unsqueeze(0).to(device)
+    with torch.no_grad():
+        features = model.encode_image(tensor)
+    vec = features.squeeze().float().cpu().numpy()
+    norm = np.linalg.norm(vec)
+    return vec / norm if norm > 0 else vec
 
-
-# ── File validation ───────────────────────────
-def detect_image_type(raw):
-    for sig, name in IMAGE_SIGNATURES.items():
-        if raw[:len(sig)] == sig:
-            return name
-    return None
-
-def validate_image(raw):
-    if not raw:
-        raise ValueError("Empty file.")
-    if not detect_image_type(raw):
-        raise ValueError("Invalid file. Only jpg, png, webp, bmp allowed.")
-    try:
-        img = Image.open(io.BytesIO(raw))
-        img.verify()
-        img = Image.open(io.BytesIO(raw))
-    except Exception:
-        raise ValueError("Corrupted or invalid image.")
-    clean = Image.new(img.mode, img.size)
-    clean.putdata(list(img.getdata()))
-    return clean.convert("RGB")
-
-
-# ── API key auth ──────────────────────────────
-def require_api_key(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        key = request.headers.get("X-API-Key","")
-        if not key:
-            return jsonify({"success":False,"error":"API key required."}),401
-        if key != API_KEY:
-            return jsonify({"success":False,"error":"Invalid API key."}),401
-        return f(*args, **kwargs)
-    return decorated
-
-
-# ── Request logging ───────────────────────────
-@app.before_request
-def before():
-    g.start = time.time()
-
-@app.after_request
-def after(response):
-    ms = round((time.time()-g.start)*1000,1)
-    logger.info(f"{request.method} {request.path} → {response.status_code} ({ms}ms)")
-    return response
-
-
-# ── Error handlers ────────────────────────────
-@app.errorhandler(400)
-def bad_request(e):
-    return jsonify({"success":False,"error":"Bad request."}),400
-
-@app.errorhandler(401)
-def unauthorized(e):
-    return jsonify({"success":False,"error":"Unauthorized."}),401
-
-@app.errorhandler(404)
-def not_found(e):
-    return jsonify({"success":False,"error":f"Not found: {request.path}"}),404
-
-@app.errorhandler(413)
-def too_large(e):
-    return jsonify({"success":False,"error":f"File too large. Max {MAX_UPLOAD_MB}MB."}),413
-
-@app.errorhandler(429)
-def rate_limited(e):
-    return jsonify({"success":False,"error":"Too many requests. Try again later."}),429
-
-@app.errorhandler(500)
-def server_error(e):
-    logger.error(f"500: {e}")
-    return jsonify({"success":False,"error":"Internal server error."}),500
-
-
-# ── Detection ─────────────────────────────────
+# ── Cosine similarity ──────────────────────────
 def cosine_sim(a, b):
-    return float(np.dot(a,b)/(np.linalg.norm(a)*np.linalg.norm(b)+1e-8))
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
 
-def run_detection(img):
+# ── Detection logic ───────────────────────────
+def detect(img: Image.Image):
     if not database:
-        return {"verdict":"UNKNOWN","confidence":"LOW",
-                "similarity_score":0.0,"matched_brand":None,
-                "message":"Database empty."}
-    q = extractor.extract_from_pil(img)
+        return (
+            "❓ UNKNOWN",
+            "Database is empty — no brands loaded.",
+            0.0,
+            "None",
+            "LOW"
+        )
+
+    query = extract(img)
     best_brand, best_score = None, -1.0
+
     for brand, stored in database.items():
-        s = cosine_sim(q, stored)
+        s = cosine_sim(query, stored)
         if s > best_score:
             best_score, best_brand = s, brand
+
     best_score = round(best_score, 4)
+    pct        = round(best_score * 100, 1)
+    brand_name = best_brand.capitalize() if best_brand else "None"
+
     if best_score >= HIGH_CONF_THRESHOLD:
-        v,c,m = "AUTHENTIC","HIGH",   f"Very close match to '{best_brand}'."
+        verdict = "✅ AUTHENTIC"
+        conf    = "HIGH"
+        msg     = f"Very close CLIP match to '{brand_name}'. This logo is genuine."
     elif best_score >= SIMILARITY_THRESHOLD:
-        v,c,m = "AUTHENTIC","MEDIUM", f"Matches '{best_brand}' with moderate confidence."
+        verdict = "✅ AUTHENTIC"
+        conf    = "MEDIUM"
+        msg     = f"Matches '{brand_name}' with moderate confidence."
     elif best_score >= LOW_CONF_THRESHOLD:
-        v,c,m = "FAKE",     "MEDIUM", f"Resembles '{best_brand}' but similarity too low."
+        verdict = "❌ FAKE"
+        conf    = "MEDIUM"
+        msg     = f"Resembles '{brand_name}' but similarity is too low. Likely counterfeit."
     else:
-        v,c,m = "FAKE",     "HIGH",   "No match found in database."
-    return {"verdict":v,"confidence":c,"similarity_score":best_score,
-            "matched_brand":best_brand,"message":m,
-            "timestamp":datetime.utcnow().isoformat()+"Z"}
+        verdict = "❌ FAKE"
+        conf    = "HIGH"
+        msg     = f"No match found. Score {pct}% is below threshold. Definitely fake."
 
+    return verdict, msg, pct, brand_name, conf
 
-# ══════════════════════════════════════════════
-#  ROUTES
-# ══════════════════════════════════════════════
+# ── Gradio UI ─────────────────────────────────
+def run_detection(image):
+    if image is None:
+        return "Please upload a logo image.", "", "", "", ""
 
-# ── Serve HTML UI at root ─────────────────────
-@app.route("/")
-@limiter.exempt
-def index():
-    return send_from_directory('.', 'index.html')
+    verdict, msg, score, brand, conf = detect(image)
 
-@app.route("/health")
-@limiter.exempt
-def health():
-    return jsonify({
-        "status": "ok",
-        "brands_loaded": len(database),
-        "mode": "vercel-light" if IS_VERCEL else "clip-full",
-        "timestamp": datetime.utcnow().isoformat()+"Z"
-    })
+    score_display = f"{score}%"
+    brands_in_db  = f"{len(database)} brands loaded"
 
-@app.route("/detect", methods=["POST"])
-@limiter.limit("10 per minute")
-def detect():
-    try:
-        if "image" not in request.files:
-            return jsonify({"success":False,
-                "error":"No image. Send multipart/form-data field 'image'."}),400
-        raw = request.files["image"].read()
-        img = validate_image(raw)
-        result = run_detection(img)
-        logger.info(f"DETECT {result['verdict']} score={result['similarity_score']}")
-        return jsonify({"success":True,"result":result})
-    except ValueError as e:
-        return jsonify({"success":False,"error":str(e)}),400
-    except Exception as e:
-        logger.error(f"DETECT error: {e}")
-        return jsonify({"success":False,"error":"Detection failed."}),500
+    return verdict, msg, score_display, brand, brands_in_db
 
-@app.route("/brands")
-@limiter.limit("30 per minute")
-def brands():
-    return jsonify({"success":True,"count":len(database),
-                    "brands":sorted(database.keys())})
+# ── Brand list ────────────────────────────────
+brand_list = ", ".join(
+    b.capitalize() for b in sorted(database.keys())
+) if database else "No brands loaded"
 
-@app.route("/add-brand", methods=["POST"])
-@require_api_key
-@limiter.limit("20 per hour")
-def add_brand():
-    try:
-        name = request.form.get("brand_name","").strip().lower()
-        if not name:
-            return jsonify({"success":False,"error":"brand_name required."}),400
-        if "image" not in request.files:
-            return jsonify({"success":False,"error":"image required."}),400
-        raw = request.files["image"].read()
-        img = validate_image(raw)
-        database[name] = extractor.extract_from_pil(img)
-        save_database()
-        return jsonify({"success":True,"message":f"'{name}' added.",
-                        "total_brands":len(database)}),201
-    except ValueError as e:
-        return jsonify({"success":False,"error":str(e)}),400
-    except Exception as e:
-        return jsonify({"success":False,"error":"Failed to add brand."}),500
+# ── Build Gradio interface ─────────────────────
+with gr.Blocks(
+    title="Fake Logo Detector",
+    theme=gr.themes.Base(
+        primary_hue="orange",
+        secondary_hue="red",
+        neutral_hue="gray",
+        font=gr.themes.GoogleFont("Nunito"),
+    ),
+    css="""
+    .gradio-container{max-width:680px!important;margin:0 auto}
+    #header{text-align:center;padding:20px 0 10px}
+    #header h1{font-size:32px;font-weight:800;color:#ff6b00}
+    #header p{color:#aaa;font-size:14px;margin-top:4px}
+    .verdict-box textarea{font-size:28px!important;font-weight:800!important;text-align:center!important}
+    """
+) as demo:
 
-@app.route("/brand/<brand_name>", methods=["DELETE"])
-@require_api_key
-def remove_brand(brand_name):
-    key = brand_name.lower().strip()
-    if key not in database:
-        return jsonify({"success":False,"error":f"'{key}' not found."}),404
-    del database[key]
-    save_database()
-    return jsonify({"success":True,"message":f"'{key}' removed.",
-                    "remaining":len(database)})
+    gr.HTML("""
+    <div id="header">
+      <h1>🐦 Fake Logo Detector</h1>
+      <p>Upload any brand logo — CLIP AI will tell you if it is authentic or fake</p>
+      <p style="color:#ff6b00;font-weight:700;font-size:13px">
+        Powered by OpenAI CLIP ViT-B/32 &nbsp;|&nbsp; Full AI accuracy
+      </p>
+    </div>
+    """)
+
+    with gr.Row():
+        with gr.Column(scale=1):
+            image_input = gr.Image(
+                type="pil",
+                label="Upload Logo Image",
+                height=280,
+            )
+            detect_btn = gr.Button(
+                "🎯 Detect Logo",
+                variant="primary",
+                size="lg",
+            )
+
+        with gr.Column(scale=1):
+            verdict_out = gr.Textbox(
+                label="Verdict",
+                interactive=False,
+                elem_classes=["verdict-box"],
+            )
+            message_out = gr.Textbox(
+                label="Details",
+                interactive=False,
+                lines=3,
+            )
+            with gr.Row():
+                score_out = gr.Textbox(
+                    label="Similarity score",
+                    interactive=False,
+                )
+                brand_out = gr.Textbox(
+                    label="Matched brand",
+                    interactive=False,
+                )
+            db_out = gr.Textbox(
+                label="Database",
+                value=f"{len(database)} brands loaded",
+                interactive=False,
+            )
+
+    detect_btn.click(
+        fn=run_detection,
+        inputs=[image_input],
+        outputs=[verdict_out, message_out, score_out, brand_out, db_out],
+    )
+
+    gr.HTML(f"""
+    <div style="margin-top:20px;padding:16px;background:rgba(255,107,0,0.08);
+         border-radius:12px;border:1px solid rgba(255,107,0,0.2)">
+      <p style="font-size:12px;color:#888;font-weight:700;margin-bottom:8px">
+        SUPPORTED BRANDS ({len(database)})
+      </p>
+      <p style="font-size:12px;color:#aaa;line-height:1.8">{brand_list}</p>
+    </div>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:#555">
+      Built by <strong style="color:#ff6b00">Gunasekar</strong> &nbsp;|&nbsp;
+      CLIP ViT-B/32 &nbsp;|&nbsp;
+      <a href="https://github.com/gunasekar05042005-dot/Fake-Logo-Detector"
+         style="color:#ff6b00" target="_blank">GitHub ↗</a>
+    </div>
+    """)
 
 if __name__ == "__main__":
-    logger.info("Starting local dev server...")
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    demo.launch()
