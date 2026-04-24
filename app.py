@@ -1,8 +1,8 @@
-# ╔══════════════════════════════════════════════════════════════════╗
+# ╔═════════════════════════════════════════════════════════════════[...]
 #  app.py — Fake Logo Detector (Vercel Version)
 #  NO PyTorch, NO CLIP, NO torch imports
 #  Uses SmartExtractor — fits within Vercel 500MB limit
-# ╚══════════════════════════════════════════════════════════════════╝
+# ╚═════════════════════════════════════════════════════════════════[...]
 
 import os, io, pickle, logging, time
 from datetime import datetime
@@ -185,11 +185,15 @@ extractor = SmartExtractor()
 
 def load_database():
     if os.path.exists(EMBEDDINGS_FILE):
-        with open(EMBEDDINGS_FILE, "rb") as f:
-            db = pickle.load(f)
-        logger.info(f"DB loaded — {len(db)} brands")
-        return db
-    logger.warning(f"No DB at {EMBEDDINGS_FILE}")
+        try:
+            with open(EMBEDDINGS_FILE, "rb") as f:
+                db = pickle.load(f)
+            logger.info(f"DB loaded — {len(db)} brands")
+            return db
+        except Exception as e:
+            logger.error(f"Failed to load DB: {e}")
+            return {}
+    logger.warning(f"No DB at {EMBEDDINGS_FILE} — starting with empty database")
     return {}
 
 database = load_database()
